@@ -92,6 +92,7 @@ class Heap {
     public:
         int allocatedSize = 0;
         int allocatedCount = 0;
+        std::unordered_set<GarbageCollectedBase*> allocated;
         std::vector<GarbageCollectedBase*> roots;
         GarbageCollectedBase* head = nullptr;
         Visitor visitor;
@@ -109,16 +110,18 @@ class Heap {
             for (auto root : roots)  {
                 visitor.Trace(root);
             }
+            CheckStack(mainStack);
         }
 
-        void Sweep(std::unordered_set<void *>& pointers) {
+        void Sweep() {
             int version = visitor.version;
             GarbageCollectedBase* prev = nullptr;
             GarbageCollectedBase* current = head;
             GarbageCollectedBase* todelete = nullptr;
             while (current != nullptr) {
-                if (current->markVersion != version && pointers.find((void *)current) == pointers.end()) {
+                if (current->markVersion != version) {
                     todelete = current;
+                    allocated.erase(todelete);
                     //std::cout << "delete unreferenced object!\n";
                     if (prev != nullptr) {
                         prev->next = current->next;
@@ -139,31 +142,31 @@ class Heap {
             }
         }
 
-        void CheckStack(Stack *stack, std::unordered_set<void *>& pointers) {
+        void CheckStack(Stack *stack) {
             auto start = stack->start;
             void *value = nullptr;
 
             for (void **ptr = &value; ptr < start; ptr++) {
                 void *value = *ptr;
                 if (value > (void *)0x10000) {
+                    if (allocated.find((GarbageCollectedBase*)value) != allocated.end()) {
+                        visitor.Trace((GarbageCollectedBase*)value);
+                    }
                     //std::cout << value << "\n";
-                    pointers.insert(value);
                 }
             }
         }
 
         void GC() {
-            std::unordered_set<void *> pointers;
-            CheckStack(mainStack, pointers);
-
             Mark();
-            Sweep(pointers);
+            Sweep();
         }
 
         template <typename T, typename... Args>
         T* MakeGarbageCollected(Args&&... args) {
             void *memory = malloc(sizeof(T));
             T *result = ::new (memory) T(std::forward<Args>(args)...);
+            allocated.insert(result);
             this->allocatedSize += sizeof(T);
             this->allocatedCount++;
             result->next = (GarbageCollectedBase*)this->head;
@@ -176,7 +179,12 @@ Heap heap;
 
 class LinkedNode final : public GarbageCollected<LinkedNode> {
  public:
-  LinkedNode(LinkedNode* next, int value) : next_(next), value_(value) {}
+  LinkedNode(LinkedNode* next, int value) : next_(next), value_(value) {
+    std::cout << "Created LinkedNode - " << this << "\n";
+  }
+  ~LinkedNode() {
+    std::cout << "Deleted LinkedNode - " << this << "\n";
+  }
   void Trace(Visitor* visitor) const {
     visitor->Trace(next_);
   }
@@ -233,6 +241,8 @@ int main() {
 
     main2();
 
+    heap.GC();
+    heap.ShowStats();
     heap.GC();
     heap.ShowStats();
 
