@@ -1,3 +1,5 @@
+// g++ demo.cpp && ./a.out
+
 // https://v8.dev/blog/high-performance-cpp-gc
 #include <stdio.h>
 #include <iostream>
@@ -18,6 +20,10 @@ class GarbageCollectedBase {
         GarbageCollectedBase *next = nullptr;
 
         virtual void Trace(Visitor* visitor) const {}
+
+        GarbageCollectedBase() {
+            std::cout << "Created GarbageCollectedBase - " << this << "\n";
+        }
 
         ~GarbageCollectedBase() {
             std::cout << "Deleted GarbageCollectedBase - " << this << "\n";
@@ -61,7 +67,7 @@ class Visitor {
         int version = 1;
 
         template <typename T>
-        void Trace(const BaseMember<T>& member) {
+        void Trace(const Member<T>& member) {
             Trace((GarbageCollectedBase *)(T *)member);
         }
 
@@ -85,9 +91,14 @@ Stack *mainStack;
 class Heap {
     public:
         int allocatedSize = 0;
+        int allocatedCount = 0;
         std::vector<GarbageCollectedBase*> roots;
         GarbageCollectedBase* head = nullptr;
         Visitor visitor;
+
+        void ShowStats() {
+            std::cout << "Heap Stats. Object Count: " << allocatedCount << ", TotalSize: " << allocatedSize << "\n";
+        }
 
         void AddRoot(GarbageCollectedBase* root) {
             roots.push_back(root);
@@ -119,6 +130,7 @@ class Heap {
                     }
                     current = current->next;
                     allocatedSize -= todelete->size();
+                    allocatedCount--;
                     delete todelete;
                 } else {
                     prev = current;
@@ -134,7 +146,7 @@ class Heap {
             for (void **ptr = &value; ptr < start; ptr++) {
                 void *value = *ptr;
                 if (value > (void *)0x10000) {
-                    std::cout << value << "\n";
+                    //std::cout << value << "\n";
                     pointers.insert(value);
                 }
             }
@@ -147,16 +159,17 @@ class Heap {
             Mark();
             Sweep(pointers);
         }
-};
 
-template <typename T, typename... Args>
-T* MakeGarbageCollected(Heap &heap, Args&&... args) {
-    void *memory = malloc(sizeof(T));
-    T *result = ::new (memory) T(std::forward<Args>(args)...);
-    heap.allocatedSize += sizeof(T);
-    result->next = (GarbageCollectedBase*)heap.head;
-    heap.head = result;
-    return result;
+        template <typename T, typename... Args>
+        T* MakeGarbageCollected(Args&&... args) {
+            void *memory = malloc(sizeof(T));
+            T *result = ::new (memory) T(std::forward<Args>(args)...);
+            this->allocatedSize += sizeof(T);
+            this->allocatedCount++;
+            result->next = (GarbageCollectedBase*)this->head;
+            this->head = result;
+            return result;
+        };
 };
 
 Heap heap;
@@ -173,42 +186,43 @@ class LinkedNode final : public GarbageCollected<LinkedNode> {
 };
 
 LinkedNode* CreateNodes() {
-  LinkedNode* first_node = MakeGarbageCollected<LinkedNode>(heap, nullptr, 1);
-  LinkedNode* second_node = MakeGarbageCollected<LinkedNode>(heap, first_node, 2);
+  LinkedNode* first_node = heap.MakeGarbageCollected<LinkedNode>(nullptr, 1);
+  LinkedNode* second_node = heap.MakeGarbageCollected<LinkedNode>(first_node, 2);
   //LinkedNode* first_node = new LinkedNode(nullptr, 1);
   return second_node;
 }
 
 void demo() {
-    MakeGarbageCollected<LinkedNode>(heap, nullptr, 3);
-    MakeGarbageCollected<LinkedNode>(heap, nullptr, 3);
-    MakeGarbageCollected<LinkedNode>(heap, nullptr, 3);
+    heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
+    heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
+    heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
 }
 
 void main2() {
 
-    LinkedNode* a = MakeGarbageCollected<LinkedNode>(heap, nullptr, 3);
-    LinkedNode* b = MakeGarbageCollected<LinkedNode>(heap, nullptr, 3);
+    LinkedNode* a = heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
+    LinkedNode* b = heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
     auto value = CreateNodes();
     auto value2 = (LinkedNode *)value->next_;
     value->Trace(new Visitor());
 
-    LinkedNode* c = MakeGarbageCollected<LinkedNode>(heap, nullptr, 3);
-    LinkedNode* d = MakeGarbageCollected<LinkedNode>(heap, nullptr, 3);
+    LinkedNode* c = heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
+    LinkedNode* d = heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
 
-    heap.AddRoot(value);
+    //heap.AddRoot(value);
 
     std::cout << value << "\n";
     std::cout << value2 << "\n";
     std::cout << sizeof(Member<LinkedNode>) << "\n";
     std::cout << sizeof(LinkedNode*) << "\n";
-    std::cout << "allocatedSize: " << heap.allocatedSize << "\n";
+    heap.ShowStats();
     printf("HELLO\n");
 
     demo();
 
+    heap.ShowStats();
     heap.GC();
-    std::cout << "allocatedSize: " << heap.allocatedSize << "\n";
+    heap.ShowStats();
 
 }
 
@@ -218,6 +232,9 @@ int main() {
     std::cout << "stackStart: " << mainStack->start << "\n";
 
     main2();
+
+    heap.GC();
+    heap.ShowStats();
 
     return 0;
 }
