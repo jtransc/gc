@@ -25,7 +25,7 @@ class GarbageCollectedBase {
             std::cout << "Created GarbageCollectedBase - " << this << "\n";
         }
 
-        ~GarbageCollectedBase() {
+        virtual ~GarbageCollectedBase() {
             std::cout << "Deleted GarbageCollectedBase - " << this << "\n";
         }
 };
@@ -86,14 +86,13 @@ class Stack {
         Stack(void **start) : start(start) { }
 };
 
-Stack *mainStack;
-
 class Heap {
     public:
         int allocatedSize = 0;
         int allocatedCount = 0;
         std::unordered_set<GarbageCollectedBase*> allocated;
-        std::vector<GarbageCollectedBase*> roots;
+        std::unordered_set<Stack*> stacks;
+        std::unordered_set<GarbageCollectedBase*> roots;
         GarbageCollectedBase* head = nullptr;
         Visitor visitor;
 
@@ -102,7 +101,19 @@ class Heap {
         }
 
         void AddRoot(GarbageCollectedBase* root) {
-            roots.push_back(root);
+            roots.insert(root);
+        }
+
+        void RemoveRoot(GarbageCollectedBase* root) {
+            roots.erase(root);
+        }
+
+        void AddStack(Stack* root) {
+            stacks.insert(root);
+        }
+
+        void RemoveStack(Stack* root) {
+            stacks.erase(root);
         }
 
         void Mark() {
@@ -110,7 +121,9 @@ class Heap {
             for (auto root : roots)  {
                 visitor.Trace(root);
             }
-            CheckStack(mainStack);
+            for (auto stack : stacks) {
+                CheckStack(stack);
+            }
         }
 
         void Sweep() {
@@ -140,6 +153,9 @@ class Heap {
                     current = current->next;
                 }
             }
+            prev = nullptr;
+            current = nullptr;
+            todelete = nullptr;
         }
 
         void CheckStack(Stack *stack) {
@@ -236,15 +252,17 @@ void main2() {
 
 int main() {
     void *ptr = nullptr;
-    mainStack = new Stack(&ptr);
-    std::cout << "stackStart: " << mainStack->start << "\n";
-
-    main2();
-
-    heap.GC();
-    heap.ShowStats();
-    heap.GC();
-    heap.ShowStats();
+    auto mainStack = new Stack(&ptr);
+    heap.AddStack(mainStack);
+    {
+        main2();
+        heap.GC();
+        heap.ShowStats();
+        heap.GC();
+        heap.ShowStats();
+    }
+    heap.RemoveStack(mainStack);
+    delete mainStack;
 
     return 0;
 }
