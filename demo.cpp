@@ -1,8 +1,10 @@
 // g++ demo.cpp && ./a.out
 
+//#define __TRACE_GC 1
+
 #include "GC.h"
 
-class LinkedNode final : public GarbageCollected<LinkedNode> {
+class LinkedNode final : public __GC {
  public:
   LinkedNode(LinkedNode* next, int value) : next_(next), value_(value) {
     //std::cout << "Created LinkedNode - " << this << "\n";
@@ -10,7 +12,8 @@ class LinkedNode final : public GarbageCollected<LinkedNode> {
   ~LinkedNode() {
     //std::cout << "Deleted LinkedNode - " << this << "\n";
   }
-  void Trace(Visitor* visitor) const {
+  int __GC_Size() { return sizeof(LinkedNode); }
+  void __GC_Trace(Visitor* visitor) const {
     visitor->Trace(next_);
   }
   Member<LinkedNode> next_;
@@ -19,53 +22,63 @@ class LinkedNode final : public GarbageCollected<LinkedNode> {
 };
 
 LinkedNode* CreateNodes() {
-  LinkedNode* first_node = heap.MakeGarbageCollected<LinkedNode>(nullptr, 1);
-  LinkedNode* second_node = heap.MakeGarbageCollected<LinkedNode>(first_node, 2);
+  LinkedNode* first_node = heap.Alloc<LinkedNode>(nullptr, 1);
+  LinkedNode* second_node = heap.Alloc<LinkedNode>(first_node, 2);
   //LinkedNode* first_node = new LinkedNode(nullptr, 1);
   return second_node;
 }
 
 void demo() {
-    heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
-    heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
-    heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
+    heap.Alloc<LinkedNode>(nullptr, 3);
+    heap.Alloc<LinkedNode>(nullptr, 3);
+    heap.Alloc<LinkedNode>(nullptr, 3);
+    std::cout << "ALLOCATED 3 more\n";
 }
 
 void main2() {
-
-    LinkedNode* a = heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
-    LinkedNode* b = heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
+    LinkedNode* a = heap.Alloc<LinkedNode>(nullptr, 3);
+    LinkedNode* b = heap.Alloc<LinkedNode>(nullptr, 3);
     auto value = CreateNodes();
     auto value2 = (LinkedNode *)value->next_;
-    value->Trace(new Visitor());
+    //value->__GC_Trace(new Visitor());
+    LinkedNode* c = heap.Alloc<LinkedNode>(nullptr, 3);
+    LinkedNode* d = heap.Alloc<LinkedNode>(nullptr, 3);
+    std::cout << "ALLOCATED 6\n";
 
-    LinkedNode* c = heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
-    LinkedNode* d = heap.MakeGarbageCollected<LinkedNode>(nullptr, 3);
+    for (int n = 0; n < 1000000; n++) {
+        heap.Alloc<LinkedNode>(nullptr, 3);
+    }
 
     //heap.AddRoot(value);
 
+    /*
     std::cout << value << "\n";
     std::cout << value2 << "\n";
     std::cout << sizeof(Member<LinkedNode>) << "\n";
     std::cout << sizeof(LinkedNode*) << "\n";
     std::cout << sizeof(LinkedNode) << "\n";
+    */
     heap.ShowStats();
-    printf("HELLO\n");
 
     demo();
 
     heap.ShowStats();
     heap.GC();
+    printf("Pointer to D: %p\n", d);
     heap.ShowStats();
 
 }
 
 int main() {
+    GC_REGISTER_THREAD();
     {
-        GC_REGISTER_THREAD();
         main2();
         heap.GC();
         heap.ShowStats();
+        heap.GC();
+        heap.ShowStats();
+    }
+    {
         heap.GC();
         heap.ShowStats();
     }

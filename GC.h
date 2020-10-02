@@ -18,30 +18,23 @@
 
 struct Visitor;
 
-struct GarbageCollectedBase {
-    virtual int size() { return 0; }
+struct __GC {
+    virtual int __GC_Size() { return sizeof(__GC); }
     int markVersion = 0;
-    GarbageCollectedBase *next = nullptr;
+    __GC *next = nullptr;
 
-    virtual void Trace(Visitor* visitor) const {}
+    virtual void __GC_Trace(Visitor* visitor) const {}
 
-    GarbageCollectedBase() {
+    __GC() {
         #if __TRACE_GC
         std::cout << "Created GarbageCollectedBase - " << this << "\n";
         #endif
     }
 
-    virtual ~GarbageCollectedBase() {
+    virtual ~__GC() {
         #if __TRACE_GC
         std::cout << "Deleted GarbageCollectedBase - " << this << "\n";
         #endif
-    }
-};
-
-template <typename T>
-struct GarbageCollected : public GarbageCollectedBase {
-    int size() override {
-    return sizeof(T);
     }
 };
 
@@ -71,14 +64,14 @@ struct Visitor {
 
     template <typename T>
     void Trace(const Member<T>& member) {
-        Trace((GarbageCollectedBase *)(T *)member);
+        Trace((__GC *)(T *)member);
     }
 
-    virtual void Trace(GarbageCollectedBase *obj) {
+    virtual void Trace(__GC *obj) {
         if (obj == nullptr) return;
         if (obj->markVersion == version) return;
         obj->markVersion = version;
-        obj->Trace(this);
+        obj->__GC_Trace(this);
         //std::cout << "Visitor.Trace: " << obj;
     }
 };
@@ -96,28 +89,34 @@ struct Stack {
 struct Heap {
     int allocatedSize = 0;
     int allocatedCount = 0;
-    std::unordered_set<GarbageCollectedBase*> allocated;
-    std::unordered_set<GarbageCollectedBase*> roots;
+    std::unordered_set<__GC*> allocated;
+    std::unordered_set<__GC*> roots;
     std::unordered_map<std::thread::id, Stack*> threads_to_stacks;
-    GarbageCollectedBase* head = nullptr;
+    __GC* head = nullptr;
     Visitor visitor;
     std::atomic<bool> sweepingStop;
+    int gcCountThresold = 1000;
+    int gcSizeThresold = 4 * 1024 * 1024;
 
     void ShowStats() {
         std::cout << "Heap Stats. Object Count: " << allocatedCount << ", TotalSize: " << allocatedSize << "\n";
     }
 
-    void AddRoot(GarbageCollectedBase* root) {
+    void AddRoot(__GC* root) {
         roots.insert(root);
     }
 
-    void RemoveRoot(GarbageCollectedBase* root) {
+    void RemoveRoot(__GC* root) {
         roots.erase(root);
     }
 
     void RegisterCurrentThread() {
         void *ptr = nullptr;
         RegisterThreadInternal(new Stack(&ptr));
+    }
+
+    void RegisterCurrentThread(void **ptr) {
+        RegisterThreadInternal(new Stack(ptr));
     }
 
     void UnregisterCurrentThread() {
@@ -153,6 +152,9 @@ struct Heap {
         for (auto root : roots)  {
             visitor.Trace(root);
         }
+        #if __TRACE_GC
+        std::cout << "threads_to_stacks.size(): " << threads_to_stacks.size() << "\n";
+        #endif
         for (auto tstack : threads_to_stacks) {
             CheckStack(tstack.second);
         }
@@ -173,9 +175,9 @@ struct Heap {
 
         int version = visitor.version;
         bool reset = version >= 1000;
-        GarbageCollectedBase* prev = nullptr;
-        GarbageCollectedBase* current = head;
-        GarbageCollectedBase* todelete = nullptr;
+        __GC* prev = nullptr;
+        __GC* current = head;
+        __GC* todelete = nullptr;
         while (current != nullptr) {
             if (current->markVersion != version) {
                 todelete = current;
@@ -190,7 +192,7 @@ struct Heap {
                     head = current->next;
                 }
                 current = current->next;
-                allocatedSize -= todelete->size();
+                allocatedSize -= todelete->__GC_Size();
                 allocatedCount--;
                 delete todelete;
             } else {
@@ -223,13 +225,15 @@ struct Heap {
         auto start = stack->start;
         void *value = nullptr;
 
-        for (void **ptr = &value; ptr < start; ptr++) {
+        for (void **ptr = &value; ptr <= start; ptr++) {
             void *value = *ptr;
             if (value > (void *)0x10000) {
-                if (allocated.find((GarbageCollectedBase*)value) != allocated.end()) {
-                    visitor.Trace((GarbageCollectedBase*)value);
+                if (allocated.find((__GC*)value) != allocated.end()) {
+                    visitor.Trace((__GC*)value);
                 }
-                //std::cout << value << "\n";
+                #if __TRACE_GC
+                std::cout << ptr << ": " << value << "\n";
+                #endif
             }
         }
     }
@@ -240,23 +244,29 @@ struct Heap {
     }
 
     template <typename T, typename... Args>
-    T* MakeGarbageCollected(Args&&... args) {
+    T* Alloc(Args&&... args) {
+        if (this->allocatedCount >= gcCountThresold) GC();
+        if (this->allocatedCount >= gcCountThresold) gcCountThresold *= 2;
+
+        if (this->allocatedSize >= gcSizeThresold) GC();
+        if (this->allocatedSize >= gcSizeThresold) gcSizeThresold *= 2;
+
         void *memory = malloc(sizeof(T));
-        T *result = ::new (memory) T(std::forward<Args>(args)...);
-        allocated.insert(result);
-        this->allocatedSize += sizeof(T);
+        T *newobj = ::new (memory) T(std::forward<Args>(args)...);
+        allocated.insert(newobj);
+        this->allocatedSize += newobj->__GC_Size();
         this->allocatedCount++;
-        result->next = (GarbageCollectedBase*)this->head;
-        this->head = result;
-        return result;
+        newobj->next = (__GC*)this->head;
+        this->head = newobj;
+        return newobj;
     };
 };
 
 Heap heap;
 
 struct GcThread {
-    GcThread() {
-        heap.RegisterCurrentThread();
+    GcThread(void **ptr) {
+        heap.RegisterCurrentThread(ptr);
         #if __TRACE_GC
         std::cout << "GcThread\n";
         #endif
@@ -269,4 +279,4 @@ struct GcThread {
     }
 };
 
-#define GC_REGISTER_THREAD() GcThread __current_gc_thread;
+#define GC_REGISTER_THREAD() void *__current_gc_thread_base = nullptr; GcThread __current_gc_thread(&__current_gc_thread_base);
