@@ -2,15 +2,13 @@
 
 #include "GC.h"
 
-Heap heap;
-
 class LinkedNode final : public GarbageCollected<LinkedNode> {
  public:
   LinkedNode(LinkedNode* next, int value) : next_(next), value_(value) {
-    std::cout << "Created LinkedNode - " << this << "\n";
+    //std::cout << "Created LinkedNode - " << this << "\n";
   }
   ~LinkedNode() {
-    std::cout << "Deleted LinkedNode - " << this << "\n";
+    //std::cout << "Deleted LinkedNode - " << this << "\n";
   }
   void Trace(Visitor* visitor) const {
     visitor->Trace(next_);
@@ -50,6 +48,7 @@ void main2() {
     std::cout << value2 << "\n";
     std::cout << sizeof(Member<LinkedNode>) << "\n";
     std::cout << sizeof(LinkedNode*) << "\n";
+    std::cout << sizeof(LinkedNode) << "\n";
     heap.ShowStats();
     printf("HELLO\n");
 
@@ -62,18 +61,16 @@ void main2() {
 }
 
 int main() {
-    void *ptr = nullptr;
-    auto mainStack = new Stack(&ptr);
-    heap.AddStack(mainStack);
     {
+        GC_REGISTER_THREAD();
         main2();
         heap.GC();
         heap.ShowStats();
         heap.GC();
         heap.ShowStats();
     }
-    heap.RemoveStack(mainStack);
-    delete mainStack;
+
+    std::cout << std::thread::hardware_concurrency() << " concurrent threads are supported.\n";
 
     return 0;
 }
