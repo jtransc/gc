@@ -13,43 +13,45 @@ class LinkedNode final : public __GC {
     //std::cout << "Deleted LinkedNode - " << this << "\n";
   }
   int __GC_Size() { return sizeof(LinkedNode); }
-  void __GC_Trace(Visitor* visitor) const {
+  void __GC_Trace(__GCVisitor* visitor) const {
     visitor->Trace(next_);
   }
-  Member<LinkedNode> next_;
+  __GCMember<LinkedNode> next_;
   int value_;
  private:
 };
 
 LinkedNode* CreateNodes() {
-  LinkedNode* first_node = heap.Alloc<LinkedNode>(nullptr, 1);
-  LinkedNode* second_node = heap.Alloc<LinkedNode>(first_node, 2);
+  LinkedNode* first_node = __GC_ALLOC<LinkedNode>(nullptr, 1);
+  LinkedNode* second_node = __GC_ALLOC<LinkedNode>(first_node, 2);
   //LinkedNode* first_node = new LinkedNode(nullptr, 1);
   return second_node;
 }
 
 void demo() {
-    heap.Alloc<LinkedNode>(nullptr, 3);
-    heap.Alloc<LinkedNode>(nullptr, 3);
-    heap.Alloc<LinkedNode>(nullptr, 3);
+    __GC_ALLOC<LinkedNode>(nullptr, 3);
+    __GC_ALLOC<LinkedNode>(nullptr, 3);
+    __GC_ALLOC<LinkedNode>(nullptr, 3);
     std::cout << "ALLOCATED 3 more\n";
 }
 
 void main2() {
-    LinkedNode* a = heap.Alloc<LinkedNode>(nullptr, 3);
-    LinkedNode* b = heap.Alloc<LinkedNode>(nullptr, 3);
+    LinkedNode* a = __GC_ALLOC<LinkedNode>(nullptr, 3);
+    LinkedNode* b = __GC_ALLOC<LinkedNode>(nullptr, 3);
     auto value = CreateNodes();
     auto value2 = (LinkedNode *)value->next_;
     //value->__GC_Trace(new Visitor());
-    LinkedNode* c = heap.Alloc<LinkedNode>(nullptr, 3);
-    LinkedNode* d = heap.Alloc<LinkedNode>(nullptr, 3);
+    LinkedNode* c = __GC_ALLOC<LinkedNode>(nullptr, 3);
+    LinkedNode* d = __GC_ALLOC<LinkedNode>(nullptr, 3);
     std::cout << "ALLOCATED 6\n";
 
-    for (int n = 0; n < 1000000; n++) {
-        heap.Alloc<LinkedNode>(nullptr, 3);
+    int allocationCount = 1000000;
+    for (int n = 0; n < allocationCount; n++) {
+        __GC_ALLOC<LinkedNode>(nullptr, 3);
     }
+    std::cout << "ALLOCATED-DISCARDED " << allocationCount << "\n";
 
-    //heap.AddRoot(value);
+    //__GC_ADD_ROOT(value);
 
     /*
     std::cout << value << "\n";
@@ -58,29 +60,29 @@ void main2() {
     std::cout << sizeof(LinkedNode*) << "\n";
     std::cout << sizeof(LinkedNode) << "\n";
     */
-    heap.ShowStats();
+   __GC_SHOW_STATS();
 
     demo();
 
-    heap.ShowStats();
-    heap.GC();
+   __GC_SHOW_STATS();
+   __GC_GC();
     printf("Pointer to D: %p\n", d);
-    heap.ShowStats();
+   __GC_SHOW_STATS();
 
 }
 
 int main() {
-    GC_REGISTER_THREAD();
+    __GC_REGISTER_THREAD();
     {
         main2();
-        heap.GC();
-        heap.ShowStats();
-        heap.GC();
-        heap.ShowStats();
+        __GC_GC();
+        __GC_SHOW_STATS();
+        __GC_GC();
+        __GC_SHOW_STATS();
     }
     {
-        heap.GC();
-        heap.ShowStats();
+        __GC_GC();
+        __GC_SHOW_STATS();
     }
 
     std::cout << std::thread::hardware_concurrency() << " concurrent threads are supported.\n";

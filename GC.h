@@ -1,4 +1,3 @@
-// https://v8.dev/blog/high-performance-cpp-gc
 #include <stdio.h>
 #include <iostream>
 #include <vector>
@@ -12,18 +11,15 @@
 #include <cassert>
 #include <thread>
 #include <chrono>
-//#include "cppgc/allocation.h"
-//#include "cppgc/member.h"
-//#include "cppgc/garbage-collected.h"
 
-struct Visitor;
+struct __GCVisitor;
 
 struct __GC {
     virtual int __GC_Size() { return sizeof(__GC); }
     int markVersion = 0;
     __GC *next = nullptr;
 
-    virtual void __GC_Trace(Visitor* visitor) const {}
+    virtual void __GC_Trace(__GCVisitor* visitor) const {}
 
     __GC() {
         #if __TRACE_GC
@@ -39,31 +35,31 @@ struct __GC {
 };
 
 template <typename T>
-struct BaseMember {
-    BaseMember() { this->raw_ = nullptr; }
-    BaseMember(const T* x) { this->raw_ = (T *)x; }
-    BaseMember& operator= (const T* x) { return *this; }
+struct __GCBaseMember {
+    __GCBaseMember() { this->raw_ = nullptr; }
+    __GCBaseMember(const T* x) { this->raw_ = (T *)x; }
+    __GCBaseMember& operator= (const T* x) { return *this; }
     operator T*() const { return raw_; }
     mutable T* raw_ = nullptr;
 };
 
 template <typename T>
-struct Member : public BaseMember<T> {
-    Member() : BaseMember<T>() {}
-    Member(const T* x) : BaseMember<T>(x) {}
+struct __GCMember : public __GCBaseMember<T> {
+    __GCMember() : __GCBaseMember<T>() {}
+    __GCMember(const T* x) : __GCBaseMember<T>(x) {}
 };
 
 template <typename T>
-struct WeakMember : public BaseMember<T> {
-    WeakMember() : BaseMember<T>() {}
-    WeakMember(const T* x) : BaseMember<T>(x) {}
+struct __GCWeakMember : public __GCBaseMember<T> {
+    __GCWeakMember() : __GCBaseMember<T>() {}
+    __GCWeakMember(const T* x) : __GCBaseMember<T>(x) {}
 };
 
-struct Visitor {
+struct __GCVisitor {
     int version = 1;
 
     template <typename T>
-    void Trace(const Member<T>& member) {
+    void Trace(const __GCMember<T>& member) {
         Trace((__GC *)(T *)member);
     }
 
@@ -76,24 +72,24 @@ struct Visitor {
     }
 };
 
-struct Stack {
+struct __GCStack {
     void **start = nullptr;
     std::mutex mutex;
     std::mutex mutex2;
     std::condition_variable cv;
     std::condition_variable cv2;
     std::promise<int> locked;
-    Stack(void **start) : start(start) { }
+    __GCStack(void **start) : start(start) { }
 };
 
-struct Heap {
+struct __GCHeap {
     int allocatedSize = 0;
     int allocatedCount = 0;
     std::unordered_set<__GC*> allocated;
     std::unordered_set<__GC*> roots;
-    std::unordered_map<std::thread::id, Stack*> threads_to_stacks;
+    std::unordered_map<std::thread::id, __GCStack*> threads_to_stacks;
     __GC* head = nullptr;
-    Visitor visitor;
+    __GCVisitor visitor;
     std::atomic<bool> sweepingStop;
     int gcCountThresold = 1000;
     int gcSizeThresold = 4 * 1024 * 1024;
@@ -112,11 +108,11 @@ struct Heap {
 
     void RegisterCurrentThread() {
         void *ptr = nullptr;
-        RegisterThreadInternal(new Stack(&ptr));
+        RegisterThreadInternal(new __GCStack(&ptr));
     }
 
     void RegisterCurrentThread(void **ptr) {
-        RegisterThreadInternal(new Stack(ptr));
+        RegisterThreadInternal(new __GCStack(ptr));
     }
 
     void UnregisterCurrentThread() {
@@ -138,7 +134,7 @@ struct Heap {
         }
     }
 
-    void RegisterThreadInternal(Stack *stack) {
+    void RegisterThreadInternal(__GCStack *stack) {
         auto current_thread_id = std::this_thread::get_id();
         #if __TRACE_GC
         std::cout << "RegisterThreadInternal:" << current_thread_id << "\n";
@@ -221,7 +217,7 @@ struct Heap {
         }
     }
 
-    void CheckStack(Stack *stack) {
+    void CheckStack(__GCStack *stack) {
         auto start = stack->start;
         void *value = nullptr;
 
@@ -262,21 +258,25 @@ struct Heap {
     };
 };
 
-Heap heap;
+__GCHeap __gcHeap;
 
-struct GcThread {
-    GcThread(void **ptr) {
-        heap.RegisterCurrentThread(ptr);
+struct __GCThread {
+    __GCThread(void **ptr) {
+        __gcHeap.RegisterCurrentThread(ptr);
         #if __TRACE_GC
         std::cout << "GcThread\n";
         #endif
     }
-    ~GcThread() {
-        heap.UnregisterCurrentThread();
+    ~__GCThread() {
+        __gcHeap.UnregisterCurrentThread();
         #if __TRACE_GC
         std::cout << "~GcThread\n";
         #endif
     }
 };
 
-#define GC_REGISTER_THREAD() void *__current_gc_thread_base = nullptr; GcThread __current_gc_thread(&__current_gc_thread_base);
+#define __GC_REGISTER_THREAD() void *__current_gc_thread_base = nullptr; __GCThread __current_gc_thread(&__current_gc_thread_base);
+#define __GC_GC __gcHeap.GC
+#define __GC_SHOW_STATS __gcHeap.ShowStats
+#define __GC_ALLOC __gcHeap.Alloc
+#define __GC_ADD_ROOT __gcHeap.AddRoot
